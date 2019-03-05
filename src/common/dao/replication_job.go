@@ -302,6 +302,57 @@ func GetRepJob(id int64) (*models.RepJob, error) {
 	return &j, nil
 }
 
+// GetRepJobs ...
+func GetRepJobs(query ...*models.RepJobQuery) ([]*models.RepJob, error) {
+	jobs := []*models.RepJob{}
+
+	qs := repJobQueryConditions(query...)
+	if len(query) > 0 && query[0] != nil {
+		qs = paginateForQuerySetter(qs, query[0].Page, query[0].Size)
+	}
+
+	qs = qs.OrderBy("-UpdateTime")
+
+	if _, err := qs.All(&jobs); err != nil {
+		return jobs, err
+	}
+
+	genTagListForJob(jobs...)
+
+	return jobs, nil
+}
+
+func repJobQueryConditions(query ...*models.RepJobQuery) orm.QuerySeter {
+	qs := GetOrmer().QueryTable(new(models.RepJob))
+	if len(query) == 0 || query[0] == nil {
+		return qs
+	}
+
+	q := query[0]
+	if q.PolicyID != 0 {
+		qs = qs.Filter("PolicyID", q.PolicyID)
+	}
+	if len(q.OpUUID) > 0 {
+		qs = qs.Filter("OpUUID__exact", q.OpUUID)
+	}
+	if len(q.Repository) > 0 {
+		qs = qs.Filter("Repository__icontains", q.Repository)
+	}
+	if len(q.Statuses) > 0 {
+		qs = qs.Filter("Status__in", q.Statuses)
+	}
+	if len(q.Operations) > 0 {
+		qs = qs.Filter("Operation__in", q.Operations)
+	}
+	if q.StartTime != nil {
+		qs = qs.Filter("CreationTime__gte", q.StartTime)
+	}
+	if q.EndTime != nil {
+		qs = qs.Filter("CreationTime__lte", q.EndTime)
+	}
+	return qs
+}
+
 // GetRepJobByPolicy ...
 func GetRepJobByPolicy(policyID int64) ([]*models.RepJob, error) {
 	var res []*models.RepJob

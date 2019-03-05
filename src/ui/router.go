@@ -94,6 +94,8 @@ func initRouters() {
 	beego.Router("/api/configurations/reset", &api.ConfigAPI{}, "post:Reset")
 	beego.Router("/api/statistics", &api.StatisticAPI{})
 	beego.Router("/api/replications", &api.ReplicationAPI{})
+	beego.Router("/api/images/replications", &api.ImageReplicateAPI{}, "post:Replicate")
+	beego.Router("/api/images/replications/:uuid", &api.ImageReplicateAPI{}, "get:Status")
 
 	beego.Router("/api/systeminfo", &api.SystemInfoAPI{}, "get:GetGeneralInfo")
 	beego.Router("/api/systeminfo/volumes", &api.SystemInfoAPI{}, "get:GetVolumeInfo")

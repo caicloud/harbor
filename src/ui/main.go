@@ -106,7 +106,7 @@ func main() {
 
 	password, err := config.InitialAdminPassword()
 	if err != nil {
-		log.Fatalf("failed to get admin's initia password: %v", err)
+		log.Fatalf("failed to get admin's initial password: %v", err)
 	}
 	if err := updateInitPassword(adminUserID, password); err != nil {
 		log.Error(err)

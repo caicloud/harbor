@@ -32,3 +32,8 @@ type StartReplicationNotification struct {
 	PolicyID int64
 	Metadata map[string]interface{}
 }
+
+func (n *StartReplicationNotification) IsIndependent() bool {
+	v, ok := n.Metadata["independent"].(bool)
+	return ok && v
+}

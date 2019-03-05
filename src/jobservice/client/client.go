@@ -22,6 +22,8 @@ import (
 // Replication holds information for submiting a replication job
 type Replication struct {
 	PolicyID   int64    `json:"policy_id"`
+	Target     int64    `json:"target"`
+	OpUUID     string   `json:"op_uuid"`
 	Repository string   `json:"repository"`
 	Operation  string   `json:"operation"`
 	Tags       []string `json:"tags"`

@@ -15,13 +15,16 @@
 package target
 
 import (
+	"fmt"
+	"reflect"
+
 	"github.com/vmware/harbor/src/common/dao"
 	"github.com/vmware/harbor/src/common/models"
 )
 
 // Manager defines the methods that a target manager should implement
 type Manager interface {
-	GetTarget(int64) (*models.RepTarget, error)
+	GetTarget(interface{}) (*models.RepTarget, error)
 }
 
 // DefaultManager implement the Manager interface
@@ -33,6 +36,25 @@ func NewDefaultManager() *DefaultManager {
 }
 
 // GetTarget ...
-func (d *DefaultManager) GetTarget(id int64) (*models.RepTarget, error) {
-	return dao.GetRepTarget(id)
+func (d *DefaultManager) GetTarget(idOrName interface{}) (*models.RepTarget, error) {
+	var target *models.RepTarget
+	var err error
+	switch v := idOrName.(type) {
+	case int64:
+		target, err = dao.GetRepTarget(v)
+	case string:
+		target, err = dao.GetRepTargetByName(v)
+	default:
+		return nil, fmt.Errorf("idOrName should have type string or int64, but got %v", reflect.TypeOf(idOrName))
+	}
+
+	if err != nil {
+		return nil, err
+	}
+
+	if target == nil {
+		return nil, fmt.Errorf("target '%v' does not exist", idOrName)
+	}
+
+	return target, nil
 }

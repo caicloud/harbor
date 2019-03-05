@@ -58,12 +58,25 @@ type RepJob struct {
 	Status     string   `orm:"column(status)" json:"status"`
 	Repository string   `orm:"column(repository)" json:"repository"`
 	PolicyID   int64    `orm:"column(policy_id)" json:"policy_id"`
+	Target     int64    `orm:"column(target)" json:"target"`
+	OpUUID     string   `orm:"column(op_uuid)" json:"op_uuid"`
 	Operation  string   `orm:"column(operation)" json:"operation"`
 	Tags       string   `orm:"column(tags)" json:"-"`
 	TagList    []string `orm:"-" json:"tags"`
 	//	Policy       RepPolicy `orm:"-" json:"policy"`
 	CreationTime time.Time `orm:"column(creation_time);auto_now_add" json:"creation_time"`
 	UpdateTime   time.Time `orm:"column(update_time);auto_now" json:"update_time"`
+}
+
+type RepJobQuery struct {
+	PolicyID   int64
+	OpUUID     string
+	Repository string
+	Statuses   []string
+	Operations []string
+	StartTime  *time.Time
+	EndTime    *time.Time
+	Pagination
 }
 
 // RepTarget is the model for a replication targe, i.e. destination, which wraps the endpoint URL and username/password of a remote registry.

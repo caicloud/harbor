@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/docker/distribution/uuid"
+
 	common_models "github.com/vmware/harbor/src/common/models"
 	"github.com/vmware/harbor/src/common/utils/log"
 	"github.com/vmware/harbor/src/jobservice/client"
@@ -35,7 +37,7 @@ import (
 type Controller interface {
 	policy.Manager
 	Init() error
-	Replicate(policyID int64, metadata ...map[string]interface{}) error
+	Replicate(policyID int64, isIndependent bool, metadata ...map[string]interface{}) error
 }
 
 //DefaultController is core module to cordinate and control the overall workflow of the
@@ -214,31 +216,102 @@ func (ctl *DefaultController) GetPolicies(query models.QueryParameter) (*models.
 
 //Replicate starts one replication defined in the specified policy;
 //Can be launched by the API layer and related triggers.
-func (ctl *DefaultController) Replicate(policyID int64, metadata ...map[string]interface{}) error {
-	policy, err := ctl.GetPolicy(policyID)
-	if err != nil {
-		return err
-	}
-	if policy.ID == 0 {
-		return fmt.Errorf("policy %d not found", policyID)
-	}
-
-	// prepare candidates for replication
-	candidates := getCandidates(&policy, ctl.sourcer, metadata...)
-
-	/*
-		targets := []*common_models.RepTarget{}
-		for _, targetID := range policy.TargetIDs {
-			target, err := ctl.targetManager.GetTarget(targetID)
-			if err != nil {
-				return err
-			}
-			targets = append(targets, target)
+func (ctl *DefaultController) Replicate(policyID int64, isIndependent bool, metadata ...map[string]interface{}) error {
+	var candidates []models.FilterItem
+	var targets []int64
+	var err error
+	if isIndependent {
+		candidates, err = ctl.getIndependentCandidates(metadata...)
+		if err != nil {
+			return err
 		}
-	*/
+		targets, err = ctl.getIndependentTargets(metadata...)
+	} else {
+		policy, err := ctl.GetPolicy(policyID)
+		if err != nil {
+			return err
+		}
+		if policy.ID == 0 {
+			return fmt.Errorf("policy %d not found", policyID)
+		}
 
-	// submit the replication
-	return replicate(ctl.replicator, policyID, candidates)
+		// Prepare candidates for replication
+		candidates = getCandidates(&policy, ctl.sourcer, metadata...)
+
+		// Get replication targets
+		targets = policy.TargetIDs
+	}
+
+	// Get operation UUID from metadata or generate one
+	opUUID := getOpUUID(metadata...)
+
+	// Submit the replication
+	return replicate(ctl.replicator, policyID, opUUID, candidates, targets)
+}
+
+func getOpUUID(metadata ...map[string]interface{}) string {
+	if len(metadata) == 0 {
+		return strings.Replace(uuid.Generate().String(), "-", "", -1)
+	}
+
+	opUUID, ok := metadata[0]["uuid"]
+	if !ok {
+		return strings.Replace(uuid.Generate().String(), "-", "", -1)
+	}
+	id, ok := opUUID.(string)
+	if !ok {
+		return strings.Replace(uuid.Generate().String(), "-", "", -1)
+	}
+	return id
+}
+
+func (ctl *DefaultController) getIndependentTargets(metadata ...map[string]interface{}) ([]int64, error) {
+	targets := []int64{}
+	if len(metadata) == 0 {
+		return targets, nil
+	}
+
+	meta, ok := metadata[0]["targets"]
+	if !ok {
+		return targets, nil
+	}
+	if t, ok := meta.([]int64); ok {
+		targets = append(targets, t...)
+	} else {
+		if t, ok := meta.([]string); ok {
+			for _, tName := range t {
+				tObj, err := ctl.targetManager.GetTarget(tName)
+				if err != nil {
+					return nil, err
+				}
+				targets = append(targets, tObj.ID)
+			}
+
+		} else {
+			return targets, fmt.Errorf("targets should be type of '[]int64'")
+		}
+	}
+
+	return targets, nil
+}
+
+func (ctl *DefaultController) getIndependentCandidates(metadata ...map[string]interface{}) ([]models.FilterItem, error) {
+	candidates := []models.FilterItem{}
+	if len(metadata) == 0 {
+		return candidates, nil
+	}
+
+	meta, ok := metadata[0]["candidates"]
+	if !ok {
+		return candidates, nil
+	}
+	if cands, ok := meta.([]models.FilterItem); ok {
+		candidates = append(candidates, cands...)
+	} else {
+		return candidates, fmt.Errorf("candiates should be type of '[]models.FilterItem'")
+	}
+
+	return candidates, nil
 }
 
 func getCandidates(policy *models.ReplicationPolicy, sourcer *source.Sourcer,
@@ -287,9 +360,9 @@ func buildFilterChain(policy *models.ReplicationPolicy, sourcer *source.Sourcer)
 	return source.NewDefaultFilterChain(filters)
 }
 
-func replicate(replicator replicator.Replicator, policyID int64, candidates []models.FilterItem) error {
+func replicate(replicator replicator.Replicator, policyID int64, opUUID string, candidates []models.FilterItem, targets []int64) error {
 	if len(candidates) == 0 {
-		log.Debugf("replicaton candidates are null, no further action needed")
+		log.Debugf("replication candidates are null, no further action needed")
 	}
 
 	repositories := map[string][]string{}
@@ -302,16 +375,20 @@ func replicate(replicator replicator.Replicator, policyID int64, candidates []mo
 		operation = candidate.Operation
 	}
 
-	for repository, tags := range repositories {
-		replication := &client.Replication{
-			PolicyID:   policyID,
-			Repository: repository,
-			Operation:  operation,
-			Tags:       tags,
-		}
-		log.Debugf("submiting replication job to jobservice: %v", replication)
-		if err := replicator.Replicate(replication); err != nil {
-			return err
+	for _, target := range targets {
+		for repository, tags := range repositories {
+			replication := &client.Replication{
+				PolicyID:   policyID,
+				Target:     target,
+				OpUUID:     opUUID,
+				Repository: repository,
+				Operation:  operation,
+				Tags:       tags,
+			}
+			log.Debugf("Submitting replication job to job service: %v", replication)
+			if err := replicator.Replicate(replication); err != nil {
+				return err
+			}
 		}
 	}
 	return nil

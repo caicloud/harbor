@@ -18,9 +18,39 @@ import (
 	"github.com/astaxie/beego/validation"
 )
 
+const (
+	ReplicateSucceed = "Succeed"
+	ReplicateFailed = "Failed"
+	ReplicateProcessing = "Processing"
+)
+
 // Replication defines the properties of model used in replication API
 type Replication struct {
 	PolicyID int64 `json:"policy_id"`
+}
+
+// ImagesReplication describes an images replication request
+type ImagesReplication struct {
+	Images  []string `json:"images"`
+	Targets []string `json:"targets"`
+}
+
+// ImagesReplicationRsp describes response of an images replication, it defines
+// UUID of the operation, which can be used to retrieve replication status
+type ImagesReplicationRsp struct {
+	UUID string `json:"uuid"`
+}
+
+// ImagesReplicationStatus describes image replication status
+type ImagesReplicationStatus struct {
+	Status     string           `json:"status"`
+	JobsStatus []ImageRepStatus `json:"jobs_status"`
+}
+
+// ImageRepStatus describes replication status of an image
+type ImageRepStatus struct {
+	Image  string `json:"image"`
+	Status string `json:"status"`
 }
 
 // Valid ...

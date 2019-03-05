@@ -38,6 +38,8 @@ type ReplicationJob struct {
 // ReplicationReq holds informations of request for /api/replicationJobs
 type ReplicationReq struct {
 	PolicyID  int64    `json:"policy_id"`
+	Target    int64    `json:"target"`
+	OpUUID    string   `json:"op_uuid"`
 	Repo      string   `json:"repository"`
 	Operation string   `json:"operation"`
 	TagList   []string `json:"tags"`
@@ -53,6 +55,12 @@ func (rj *ReplicationJob) Post() {
 	var data ReplicationReq
 	rj.DecodeJSONReq(&data)
 	log.Debugf("data: %+v", data)
+
+	if data.PolicyID == -1 {
+		rj.replicateSingle(data)
+		return
+	}
+
 	p, err := dao.GetRepPolicy(data.PolicyID)
 	if err != nil {
 		log.Errorf("Failed to get policy, error: %v", err)
@@ -64,30 +72,21 @@ func (rj *ReplicationJob) Post() {
 		rj.RenderError(http.StatusNotFound, fmt.Sprintf("Policy not found, id: %d", data.PolicyID))
 		return
 	}
-	if len(data.Repo) == 0 { // sync all repositories
-		repoList, err := getRepoList(p.ProjectID)
-		if err != nil {
-			log.Errorf("Failed to get repository list, project id: %d, error: %v", p.ProjectID, err)
-			rj.RenderError(http.StatusInternalServerError, err.Error())
-			return
-		}
-		log.Debugf("repo list: %v", repoList)
-		for _, repo := range repoList {
-			err := rj.addJob(repo, data.PolicyID, models.RepOpTransfer)
-			if err != nil {
-				log.Errorf("Failed to insert job record, error: %v", err)
-				rj.RenderError(http.StatusInternalServerError, err.Error())
-				return
-			}
-		}
-	} else { // sync a single repository
-		var op string
-		if len(data.Operation) > 0 {
-			op = data.Operation
-		} else {
-			op = models.RepOpTransfer
-		}
-		err := rj.addJob(data.Repo, data.PolicyID, op, data.TagList...)
+	if len(data.Repo) > 0 {
+		rj.replicateSingle(data)
+		return
+	}
+
+	// sync all repositories
+	repoList, err := getRepoList(p.ProjectID)
+	if err != nil {
+		log.Errorf("Failed to get repository list, project id: %d, error: %v", p.ProjectID, err)
+		rj.RenderError(http.StatusInternalServerError, err.Error())
+		return
+	}
+	log.Debugf("repo list: %v", repoList)
+	for _, repo := range repoList {
+		err := rj.addJob(repo, data.PolicyID, data.Target, data.OpUUID, models.RepOpTransfer)
 		if err != nil {
 			log.Errorf("Failed to insert job record, error: %v", err)
 			rj.RenderError(http.StatusInternalServerError, err.Error())
@@ -96,10 +95,27 @@ func (rj *ReplicationJob) Post() {
 	}
 }
 
-func (rj *ReplicationJob) addJob(repo string, policyID int64, operation string, tags ...string) error {
+func (rj *ReplicationJob) replicateSingle(request ReplicationReq) {
+	var op string
+	if len(request.Operation) > 0 {
+		op = request.Operation
+	} else {
+		op = models.RepOpTransfer
+	}
+	err := rj.addJob(request.Repo, request.PolicyID, request.Target, request.OpUUID, op, request.TagList...)
+	if err != nil {
+		log.Errorf("Failed to insert job record, error: %v", err)
+		rj.RenderError(http.StatusInternalServerError, err.Error())
+		return
+	}
+}
+
+func (rj *ReplicationJob) addJob(repo string, policyID, target int64, opUUID string, operation string, tags ...string) error {
 	j := models.RepJob{
 		Repository: repo,
 		PolicyID:   policyID,
+		Target:     target,
+		OpUUID:     opUUID,
 		Operation:  operation,
 		TagList:    tags,
 	}

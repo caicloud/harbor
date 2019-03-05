@@ -108,13 +108,6 @@ func (rj *RepJob) Init() error {
 	if job == nil {
 		return fmt.Errorf("The job doesn't exist in DB, job id: %d", rj.id)
 	}
-	policy, err := dao.GetRepPolicy(job.PolicyID)
-	if err != nil {
-		return fmt.Errorf("Failed to get policy, error: %v", err)
-	}
-	if policy == nil {
-		return fmt.Errorf("The policy doesn't exist in DB, policy id:%d", job.PolicyID)
-	}
 
 	regURL, err := config.LocalRegURL()
 	if err != nil {
@@ -126,12 +119,12 @@ func (rj *RepJob) Init() error {
 		Tags:        job.TagList,
 		Operation:   job.Operation,
 	}
-	target, err := dao.GetRepTarget(policy.TargetID)
+	target, err := dao.GetRepTarget(job.Target)
 	if err != nil {
 		return fmt.Errorf("Failed to get target, error: %v", err)
 	}
 	if target == nil {
-		return fmt.Errorf("The target doesn't exist in DB, target id: %d", policy.TargetID)
+		return fmt.Errorf("The target doesn't exist in DB, target id: %d", job.Target)
 	}
 	rj.parm.TargetURL = target.URL
 	rj.parm.TargetUsername = target.Username
