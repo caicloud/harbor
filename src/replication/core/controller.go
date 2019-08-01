@@ -37,7 +37,7 @@ import (
 type Controller interface {
 	policy.Manager
 	Init() error
-	Replicate(policyID int64, metadata ...map[string]interface{}) error
+	Replicate(policyID int64, isIndependent bool, metadata ...map[string]interface{}) error
 }
 
 // DefaultController is core module to cordinate and control the overall workflow of the
@@ -200,16 +200,45 @@ func (ctl *DefaultController) GetPolicies(query models.QueryParameter) (*models.
 
 // Replicate starts one replication defined in the specified policy;
 // Can be launched by the API layer and related triggers.
-func (ctl *DefaultController) Replicate(policyID int64, metadata ...map[string]interface{}) error {
-	policy, err := ctl.GetPolicy(policyID)
+func (ctl *DefaultController) Replicate(policyID int64, isIndependent bool, metadata ...map[string]interface{}) error {
+	var replication *replicator.Replication
+	var err error
+	if isIndependent {
+		replication, err = ctl.getIndependentReplication(metadata...)
+		if err != nil {
+			log.Errorf("get independent replication error: %v", err)
+			return err
+		}
+	} else {
+		replication, err = ctl.getReplication(policyID, metadata...)
+		if err != nil {
+			log.Errorf("get replication error: %v", err)
+			return err
+		}
+	}
+
+	// Get operation uuid from metadata, if none provided, generate one.
+	opUUID, err := getOpUUID(metadata...)
 	if err != nil {
 		return err
 	}
+	replication.OpUUID = opUUID
+
+	// submit the replication
+	return ctl.replicator.Replicate(replication)
+}
+
+// getReplication gathers replication information for replicator.
+func (ctl *DefaultController) getReplication(policyID int64, metadata ...map[string]interface{}) (*replicator.Replication, error) {
+	policy, err := ctl.GetPolicy(policyID)
+	if err != nil {
+		return nil, err
+	}
 	if policy.ID == 0 {
-		return fmt.Errorf("policy %d not found", policyID)
+		return nil, fmt.Errorf("policy %d not found", policyID)
 	}
 
-	// prepare candidates for replication
+	// Prepare candidates for replication
 	candidates := getCandidates(&policy, ctl.sourcer, metadata...)
 	if len(candidates) == 0 {
 		log.Debugf("replication candidates are null, no further action needed")
@@ -219,24 +248,54 @@ func (ctl *DefaultController) Replicate(policyID int64, metadata ...map[string]i
 	for _, targetID := range policy.TargetIDs {
 		target, err := ctl.targetManager.GetTarget(targetID)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		targets = append(targets, target)
 	}
 
-	// Get operation uuid from metadata, if none provided, generate one.
-	opUUID, err := getOpUUID(metadata...)
-	if err != nil {
-		return err
-	}
-
-	// submit the replication
-	return ctl.replicator.Replicate(&replicator.Replication{
+	return &replicator.Replication{
 		PolicyID:   policyID,
-		OpUUID:     opUUID,
 		Candidates: candidates,
 		Targets:    targets,
-	})
+	}, nil
+}
+
+// getIndependentReplication gathers replication information for replicator, it's independent replication, without replication policy
+func (ctl *DefaultController) getIndependentReplication(metadata ...map[string]interface{}) (*replicator.Replication, error) {
+	if len(metadata) == 0 {
+		return nil, fmt.Errorf("no metadata provided")
+	}
+
+	candidates := []models.FilterItem{}
+	meta, ok := metadata[0]["candidates"]
+	if !ok {
+		return nil, fmt.Errorf("no candidates provided in metadata")
+	}
+	if cands, ok := meta.([]models.FilterItem); ok {
+		candidates = append(candidates, cands...)
+	} else {
+		return nil, fmt.Errorf("candiates should be type of '[]models.FilterItem'")
+	}
+
+	targetNames, ok := metadata[0]["targets"].([]string)
+	if !ok {
+		return nil, fmt.Errorf("no targets provided in metadata")
+	}
+
+	targets := []*common_models.RepTarget{}
+	for _, n := range targetNames {
+		target, err := ctl.targetManager.GetTarget(n)
+		if err != nil {
+			return nil, err
+		}
+		targets = append(targets, target)
+	}
+
+	return &replicator.Replication{
+		PolicyID:   -1,
+		Candidates: candidates,
+		Targets:    targets,
+	}, nil
 }
 
 func getCandidates(policy *models.ReplicationPolicy, sourcer *source.Sourcer,

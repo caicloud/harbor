@@ -38,12 +38,13 @@ func (srh *StartReplicationHandler) Handle(value interface{}) error {
 	}
 
 	notification := value.(notification.StartReplicationNotification)
-	if notification.PolicyID <= 0 {
+	isIndependent := notification.IsIndependent()
+	if !isIndependent && notification.PolicyID <= 0 {
 		return errors.New("Invalid policy")
 	}
 
 	// Start replication
-	return core.GlobalController.Replicate(notification.PolicyID, notification.Metadata)
+	return core.GlobalController.Replicate(notification.PolicyID, isIndependent, notification.Metadata)
 }
 
 // IsStateful implements the same method of notification handler interface
