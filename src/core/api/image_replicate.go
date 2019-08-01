@@ -57,7 +57,7 @@ func (r *ImageReplicateAPI) Replicate() {
 		notification.StartReplicationNotification{
 			PolicyID: -1,
 			Metadata: map[string]interface{}{
-				"uuid":        opUUID,
+				"op_uuid":     opUUID,
 				"independent": true,
 				"candidates":  items,
 				"targets":     imgReplication.Targets,
