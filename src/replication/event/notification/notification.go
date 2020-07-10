@@ -33,6 +33,7 @@ type StartReplicationNotification struct {
 	Metadata map[string]interface{}
 }
 
+// IsIndependent check replication is independent or not
 func (n *StartReplicationNotification) IsIndependent() bool {
 	v, ok := n.Metadata["independent"].(bool)
 	return ok && v

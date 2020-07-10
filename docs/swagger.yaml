@@ -3634,7 +3634,8 @@ definitions:
     properties:
       status:
         type: string
-        description: Status of the overall replication: 'Succeed', 'Failed', 'Processing'.
+        description: >-
+          Status of the overall replication: 'Succeed', 'Failed', 'Processing'.
       jobs_status:
         type: array
         items:

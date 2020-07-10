@@ -19,8 +19,11 @@ import (
 )
 
 const (
-	ReplicateSucceed    = "Succeed"
-	ReplicateFailed     = "Failed"
+	// ReplicateSucceed : 'Succeed'
+	ReplicateSucceed = "Succeed"
+	// ReplicateFailed : 'Failed'
+	ReplicateFailed = "Failed"
+	// ReplicateProcessing : 'Processing'
 	ReplicateProcessing = "Processing"
 )
 

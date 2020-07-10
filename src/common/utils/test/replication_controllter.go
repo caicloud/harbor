@@ -21,6 +21,6 @@ type FakeReplicatoinController struct {
 func (f *FakeReplicatoinController) Init() error {
 	return nil
 }
-func (f *FakeReplicatoinController) Replicate(policyID int64, metadata ...map[string]interface{}) error {
+func (f *FakeReplicatoinController) Replicate(policyID int64, isIndependent bool, metadata ...map[string]interface{}) error {
 	return nil
 }
