@@ -164,14 +164,24 @@ func PopulateRegistries(registryMgr registry.Manager, policy *model.Policy) erro
 	return nil
 }
 
-func getRegistry(registryMgr registry.Manager, registry *model.Registry) (*model.Registry, error) {
-	if registry == nil || registry.ID == 0 {
+func getRegistry(registryMgr registry.Manager, registry *model.Registry) (reg *model.Registry, err error) {
+	if registry == nil {
 		return GetLocalRegistry(), nil
 	}
-	reg, err := registryMgr.Get(registry.ID)
+
+	if registry.ID == 0 {
+		reg, err = registryMgr.GetByName(registry.Name)
+		if err == nil {
+			return reg, nil
+		}
+		return GetLocalRegistry(), nil
+	}
+
+	reg, err = registryMgr.Get(registry.ID)
 	if err != nil {
 		return nil, err
 	}
+
 	if reg == nil {
 		return nil, fmt.Errorf("registry %d not found", registry.ID)
 	}

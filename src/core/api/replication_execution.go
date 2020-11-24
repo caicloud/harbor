@@ -19,7 +19,9 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"strings"
 
+	common_dao "github.com/goharbor/harbor/src/common/dao"
 	common_http "github.com/goharbor/harbor/src/common/http"
 	"github.com/goharbor/harbor/src/replication"
 	"github.com/goharbor/harbor/src/replication/dao/models"
@@ -184,6 +186,213 @@ func (r *ReplicationOperationAPI) CreateExecution() {
 		return
 	}
 	r.Redirect(http.StatusCreated, strconv.FormatInt(executionID, 10))
+}
+
+// CreateImagesExecution starts an images list replication
+func (r *ReplicationOperationAPI) CreateImagesExecution() {
+	imagesRep := &model.ImagesReplication{}
+	isValid, err := r.DecodeJSONReqAndValidate(imagesRep)
+	if !isValid {
+		r.SendBadRequestError(err)
+		return
+	}
+
+	registry, err := replication.RegistryMgr.GetByName(imagesRep.Targets[0])
+	if err != nil {
+		r.SendNotFoundError(fmt.Errorf("targets registry %d not found", imagesRep.Targets[0]))
+		return
+	}
+
+	policy := &model.Policy{
+		// ID:          0,
+		// Name:        "images-replication",
+		// Description: "will not store the policy to database",
+		Creator:     "cargo",
+		SrcRegistry: nil,
+		DestRegistry: &model.Registry{
+			ID:   registry.ID,
+			Name: imagesRep.Targets[0],
+			Type: model.RegistryTypeHarbor,
+		},
+		DestNamespace: "",
+		Filters:       []*model.Filter{},
+		Trigger: &model.Trigger{
+			Type: model.TriggerTypeManual,
+		},
+		Deletion: false,
+		// If override the image tag
+		Override: true,
+		Enabled:  true,
+	}
+	execution := &models.Execution{}
+	if err := r.DecodeJSONReq(execution); err != nil {
+		r.SendBadRequestError(err)
+		return
+	}
+
+	if policy == nil {
+		r.SendNotFoundError(fmt.Errorf("policy %d not found", execution.PolicyID))
+		return
+	}
+	if !policy.Enabled {
+		r.SendBadRequestError(fmt.Errorf("the policy %d is disabled", execution.PolicyID))
+		return
+	}
+	if err = event.PopulateRegistries(replication.RegistryMgr, policy); err != nil {
+		r.SendInternalServerError(fmt.Errorf("failed to populate registries for policy %d: %v", execution.PolicyID, err))
+		return
+	}
+	resources := make([]*model.Resource, 0)
+
+	for _, image := range imagesRep.Images {
+		recource, err := imageToResource(image, registry)
+		if err != nil {
+			r.SendNotFoundError(fmt.Errorf("image %s is malformed: %v", image, err))
+			return
+		}
+		resources = append(resources, recource)
+	}
+
+	trigger := r.GetString("trigger", string(model.TriggerTypeManual))
+	executionID, err := replication.OperationCtl.StartReplicationWithResources(policy, model.TriggerType(trigger), resources...)
+	if err != nil {
+		r.SendInternalServerError(fmt.Errorf("failed to start replication for policy %d: %v", execution.PolicyID, err))
+		return
+	}
+
+	rsp := model.ImagesReplicationRsp{
+		UUID: strconv.FormatInt(executionID, 10),
+	}
+	r.WriteJSONData(rsp)
+}
+
+func imageToResource(image string, registry *model.Registry) (*model.Resource, error) {
+	var repository, tag string
+	if i := strings.LastIndex(image, ":"); i != -1 {
+		repository = image[:i]
+		tag = image[i+1:]
+	}
+
+	repoMeta := make(map[string]interface{})
+
+	repoRecord, err := common_dao.GetRepositoryByName(repository)
+	if err != nil {
+		return nil, err
+	}
+
+	projectMeta, err := common_dao.GetProjectMetadata(repoRecord.ProjectID)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, v := range projectMeta {
+		repoMeta[v.Name] = v.Value
+	}
+
+	return &model.Resource{
+		Type:     model.ResourceTypeImage,
+		Registry: registry,
+		Metadata: &model.ResourceMetadata{
+			Repository: &model.Repository{
+				Name:     repository,
+				Metadata: repoMeta,
+			},
+			Vtags: []string{tag},
+		},
+	}, nil
+
+}
+
+// GetImagesExecutionStatus get status of images execution
+func (r *ReplicationOperationAPI) GetImagesExecutionStatus() {
+	query := &models.TaskQuery{
+		ExecutionID:  r.execution.ID,
+		ResourceType: r.GetString("resource_type"),
+	}
+	status := r.GetString("status")
+	if len(status) > 0 {
+		query.Statuses = []string{status}
+	}
+	page, size, err := r.GetPaginationParams()
+	if err != nil {
+		r.SendBadRequestError(err)
+		return
+	}
+	query.Page = page
+	query.Size = size
+
+	_, tasks, err := replication.OperationCtl.ListTasks(query)
+	if err != nil {
+		r.SendInternalServerError(fmt.Errorf("failed to list tasks: %v", err))
+		return
+	}
+
+	rsp := model.ImagesReplicationStatus{
+		Status: model.ImagesReplicateSucceed,
+	}
+	var hasProcessing, hasFailed bool
+
+	for _, task := range tasks {
+		rsp.JobsStatus = append(rsp.JobsStatus, model.ImageRepStatus{
+			// convert 'library/alpine:[3.7]' to 'library/alpine:3.7'
+			Image: strings.ReplaceAll(strings.ReplaceAll(task.SrcResource, "[", ""), "]", ""),
+			// compatible with Harbor 1.7
+			Status: changeStatus(task.Status),
+		})
+
+		s := convertStatus(task.Status)
+		if s == model.ImagesReplicateProcessing {
+			hasProcessing = true
+		} else if s == model.ImagesReplicateFailed {
+			hasFailed = true
+		}
+	}
+
+	if hasProcessing {
+		rsp.Status = model.ImagesReplicateProcessing
+	} else if hasFailed {
+		rsp.Status = model.ImagesReplicateFailed
+	}
+
+	r.WriteJSONData(rsp)
+}
+
+// changeStatus changes the task status in Harbor 1.8.6
+//		[https://github.com/goharbor/harbor/blob/v1.8.6/src/replication/dao/models/execution.go#L27-L33]
+//	to job status in Harbor 1.7.7
+//      [https://github.com/goharbor/harbor/blob/v1.7.7/src/common/models/job.go#L17-L36]
+func changeStatus(taskStatus string) string {
+	switch taskStatus {
+	case models.TaskStatusFailed:
+		return "error"
+	case models.TaskStatusInitialized:
+		return "scheduled"
+	case models.TaskStatusInProgress:
+		return "running"
+	case models.TaskStatusPending:
+		return "pending"
+	case models.TaskStatusStopped:
+		return "stopped"
+	case models.TaskStatusSucceed:
+		return "finished"
+	default:
+		return taskStatus
+	}
+	return taskStatus
+}
+
+func convertStatus(taskStatus string) string {
+	switch taskStatus {
+	case models.TaskStatusFailed, models.TaskStatusStopped:
+		return model.ImagesReplicateFailed
+	case models.TaskStatusInitialized, models.TaskStatusInProgress, models.TaskStatusPending:
+		return model.ImagesReplicateProcessing
+	case models.TaskStatusSucceed:
+		return model.ImagesReplicateSucceed
+	default:
+		return taskStatus
+	}
+	return taskStatus
 }
 
 // GetExecution gets one execution of the replication

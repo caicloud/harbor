@@ -1936,6 +1936,61 @@ paths:
           $ref: '#/responses/PreconditionFailed'
         '500':
           $ref: '#/responses/InternalServerError'
+  /images/replications:
+    post:
+      summary: Replicate a list of images to remote registries
+      description: |
+        Replicate a given list of images to remote registries, image list
+        and target registry list will be specified in request body. It's
+        an asynchronous API. Caller should use the returned replication id
+        to retrieve status of the replication.
+      parameters:
+        - name: request
+          in: body
+          description: Images reqplication request
+          required: true
+          schema:
+            $ref: '#/definitions/ImagesReplicateReq'
+      tags:
+        - Products
+      responses:
+        '200':
+          description: Start images replication successfully.
+          schema:
+            $ref: '#/definitions/ImagesReplicateRsp'
+        '400':
+          description: Invalid images provided.
+        '401':
+          description: User need to log in first.
+        '500':
+          description: Unexpected internal errors.
+  /images/replications/{id}:
+    get:
+      summary: Get images replication status
+      description: >
+        Get images replication status with replication uuid. It will retrieve
+        status of all jobs created by the given replication.
+      parameters:
+        - name: id
+          in: path
+          type: string
+          required: true
+          description: id of the replication
+      tags:
+        - Products
+      responses:
+        '200':
+          description: Get status successfully.
+          schema:
+            $ref: '#/definitions/ImagesReplicateStatus'
+        '401':
+          description: User need to log in first.
+        '403':
+          description: Forbidden.
+        '404':
+          description: No jobs found to this replication id.
+        '500':
+          description: Unexpected internal errors.
   /labels:
     get:
       summary: List labels according to the query strings.
@@ -5061,3 +5116,45 @@ definitions:
       metadata:
         type: object
         description: The metadata of namespace
+  ImagesReplicateReq:
+    type: object
+    properties:
+      images:
+        type: array
+        items:
+          type: string
+        description: images to be replicated
+      targets:
+        type: array
+        items:
+          type: string
+        description: remote registries images will be replicated to
+  ImagesReplicateRsp:
+    type: object
+    properties:
+      uuid:
+        type: string
+        description: id of the image replication
+  ImagesReplicateStatus:
+    type: object
+    properties:
+      status:
+        type: string
+        description: >-
+          Status of the overall replication: 'Succeed', 'Failed', 'Processing'.
+      jobs_status:
+        type: array
+        items:
+          $ref: '#/definitions/ImageRepStatus'
+        description: details status for each job
+  ImageRepStatus:
+    type: object
+    properties:
+      image:
+        type: string
+        description: image
+      status:
+        type: string
+        description: >-
+          Status of the images been replicated: 'pending', '', 'running', 'error',
+          'stopped', 'finished', 'canceled', 'retrying'.
