@@ -199,7 +199,12 @@ func (r *ReplicationOperationAPI) CreateImagesExecution() {
 
 	registry, err := replication.RegistryMgr.GetByName(imagesRep.Targets[0])
 	if err != nil {
-		r.SendNotFoundError(fmt.Errorf("targets registry %d not found", imagesRep.Targets[0]))
+		r.SendNotFoundError(fmt.Errorf("targets registry %v not found, err: %v", imagesRep.Targets[0], err))
+		return
+	}
+
+	if registry == nil {
+		r.SendNotFoundError(fmt.Errorf("targets registry %v not found(nil), please integrate the target registry firstly", imagesRep.Targets[0]))
 		return
 	}
 
