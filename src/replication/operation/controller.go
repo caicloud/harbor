@@ -34,6 +34,7 @@ import (
 type Controller interface {
 	// trigger is used to specify what this replication is triggered by
 	StartReplication(policy *model.Policy, resource *model.Resource, trigger model.TriggerType) (int64, error)
+	StartReplicationWithResources(policy *model.Policy, trigger model.TriggerType, resource ...*model.Resource) (int64, error)
 	StopReplication(int64) error
 	ListExecutions(...*models.ExecutionQuery) (int64, []*models.Execution, error)
 	GetExecution(int64) (*models.Execution, error)
@@ -73,6 +74,17 @@ type controller struct {
 }
 
 func (c *controller) StartReplication(policy *model.Policy, resource *model.Resource, trigger model.TriggerType) (int64, error) {
+	if resource != nil {
+		return c.startReplication(policy, trigger, resource)
+	}
+	return c.startReplication(policy, trigger)
+}
+
+func (c *controller) StartReplicationWithResources(policy *model.Policy, trigger model.TriggerType, resources ...*model.Resource) (int64, error) {
+	return c.startReplication(policy, trigger, resources...)
+}
+
+func (c *controller) startReplication(policy *model.Policy, trigger model.TriggerType, resources ...*model.Resource) (int64, error) {
 	if !policy.Enabled {
 		return 0, fmt.Errorf("the policy %d is disabled", policy.ID)
 	}
@@ -91,7 +103,7 @@ func (c *controller) StartReplication(policy *model.Policy, resource *model.Reso
 		defer func() {
 			c.replicators <- struct{}{}
 		}()
-		flow := c.createFlow(id, policy, resource)
+		flow := c.createFlow(id, policy, resources...)
 		if n, err := c.flowCtl.Start(flow); err != nil {
 			// only update the execution when got error.
 			// if got no error, it will be updated automatically
@@ -108,19 +120,19 @@ func (c *controller) StartReplication(policy *model.Policy, resource *model.Reso
 			log.Errorf("the execution %d failed: %v", id, err)
 		}
 	}()
+
 	return id, nil
 }
 
 // create different replication flows according to the input parameters
-func (c *controller) createFlow(executionID int64, policy *model.Policy, resource *model.Resource) flow.Flow {
-	// replicate the deletion operation, so create a deletion flow
-	if resource != nil && resource.Deleted {
-		return flow.NewDeletionFlow(c.executionMgr, c.scheduler, executionID, policy, resource)
+func (c *controller) createFlow(executionID int64, policy *model.Policy, resources ...*model.Resource) flow.Flow {
+	// TODO: Validate if all resources have the same `Deleted` attribute
+
+	// replicate the deletion operation(according to the first resource), so create a deletion flow
+	if len(resources) > 0 && resources[0].Deleted {
+		return flow.NewDeletionFlow(c.executionMgr, c.scheduler, executionID, policy, resources...)
 	}
-	resources := []*model.Resource{}
-	if resource != nil {
-		resources = append(resources, resource)
-	}
+
 	return flow.NewCopyFlow(c.executionMgr, c.scheduler, executionID, policy, resources...)
 }
 
