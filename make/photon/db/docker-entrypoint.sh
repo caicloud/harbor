@@ -67,7 +67,7 @@ EOF
         file_env 'POSTGRES_USER' 'postgres'
         file_env 'POSTGRES_DB' "$POSTGRES_USER"
 
-        psql=( psql -v ON_ERROR_STOP=1 )
+        psql=( psql -h /postgresql -v ON_ERROR_STOP=1 )
 
         if [ "$POSTGRES_DB" != 'postgres' ]; then
                 "${psql[@]}" --username postgres <<-EOSQL
